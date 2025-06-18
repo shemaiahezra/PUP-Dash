@@ -1,0 +1,336 @@
+import pygame
+import sys
+import random
+import spritesheet
+
+pygame.init()
+
+# Virtual resolution (fixed)
+VIRTUAL_WIDTH = 1600
+VIRTUAL_HEIGHT = 900
+
+# Fullscreen display
+screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+screen_width, screen_height = screen.get_size()
+
+# Virtual surface (dito ka mag-draw ng lahat)
+virtual_surface = pygame.Surface((VIRTUAL_WIDTH, VIRTUAL_HEIGHT))
+
+# --- Load assets as usual, use fixed positions/sizes ---
+background_image = pygame.image.load("PUP Dash/assets/images/Background.png")
+background_image = pygame.transform.scale(background_image, (VIRTUAL_WIDTH, VIRTUAL_HEIGHT))
+
+overlay_image = pygame.image.load("PUP Dash/assets/images/pup building block (1).png")
+overlay_image = pygame.transform.scale(overlay_image, (1400, 840))
+overlay_position = (82, 117)
+
+char_sprite_image = pygame.image.load("PUP Dash/assets/images/piyotttt-1.png.png").convert_alpha()
+char_sprite_sheet = spritesheet.SpriteSheet(char_sprite_image)
+
+char_frame_width, char_frame_height = 26, 26
+char_scale = 3
+char_animation_steps = 4
+char_animation_cooldown = 130
+
+char_right_frames = []
+char_left_frames = []
+
+for i in range(char_animation_steps):
+    image = char_sprite_sheet.get_image(i, char_frame_width, char_frame_height, char_scale, None)
+    char_right_frames.append(image)
+    char_left_frames.append(pygame.transform.flip(image, True, False))
+
+char_x = VIRTUAL_WIDTH - char_frame_width * char_scale - 50
+char_y = 760
+char_speed = 15
+char_facing_right = False
+char_frame = 0
+char_last_update = pygame.time.get_ticks()
+char_target_x, char_target_y = char_x, char_y
+
+group_frame_width = 144
+group_frame_height = 76
+group_scale = 1
+group_animation_cooldown = 150
+group_animation_steps = 3
+
+group_sprites = {
+    "normal": pygame.image.load("PUP Dash/assets/images/normal_stud.png").convert_alpha(),
+    "ie": pygame.image.load("PUP Dash/assets/images/ie_stud.png").convert_alpha(),
+    "comsoc": pygame.image.load("PUP Dash/assets/images/comsoc_stud.png").convert_alpha(),
+    "psych": pygame.image.load("PUP Dash/assets/images/psych_stud.png").convert_alpha(),
+    "ptso": pygame.image.load("PUP Dash/assets/images/ptso_stud.png").convert_alpha(),
+}
+
+def load_group_frames(sprite_image):
+    sheet = spritesheet.SpriteSheet(sprite_image)
+    right_frames, left_frames = [], []
+    for i in range(group_animation_steps):
+        frame = sheet.get_image(i, group_frame_width, group_frame_height, group_scale, None)
+        right_frames.append(frame)
+        left_frames.append(pygame.transform.flip(frame, True, False))
+    return right_frames, left_frames
+
+key_image = pygame.image.load("PUP Dash/assets/images/keyrida.png").convert_alpha()
+key_mask = pygame.mask.from_surface(key_image)
+key_width, key_height = key_image.get_width(), key_image.get_height()
+
+check_image = pygame.image.load("PUP Dash/assets/images/check.png").convert_alpha()
+check_mask = pygame.mask.from_surface(check_image)
+check_width, check_height = check_image.get_width(), check_image.get_height()
+
+room_image = pygame.image.load("PUP Dash/assets/images/keyroom.png").convert_alpha()
+room_image = pygame.transform.scale(room_image, (1300, 740))
+room_position = (88, 202)
+
+bord_image = pygame.image.load("PUP Dash/assets/images/keyborder.png").convert_alpha()
+bord_image = pygame.transform.scale(bord_image, (1300, 740))
+bord_position = (88, 202)
+
+mid_image = pygame.image.load("PUP Dash/assets/images/gwardiii.png").convert_alpha()
+mid_sheet = spritesheet.SpriteSheet(mid_image)
+mid_frame_width, mid_frame_height = 50, 97
+mid_animation_steps = 2
+mid_scale = 1
+mid_animation_cooldown = 300
+
+class MidLayer:
+    def __init__(self, x, y):
+        self.frames = [
+            mid_sheet.get_image(i, mid_frame_width, mid_frame_height, mid_scale, None)
+            for i in range(mid_animation_steps)
+        ]
+        self.x = x
+        self.y = y
+        self.frame = 0
+        self.last_update = pygame.time.get_ticks()
+
+    def update(self, current_time):
+        if current_time - self.last_update > mid_animation_cooldown:
+            self.frame = (self.frame + 1) % mid_animation_steps
+            self.last_update = current_time
+
+    def draw(self, surface):
+        surface.blit(self.frames[self.frame], (self.x, self.y))
+
+sheet = MidLayer(292, 717)
+
+class CheckPopup:
+    def __init__(self):
+        self.positions = [(207, 470), (370, 470), (1082, 470), (1243, 470)]
+        self.visible = False
+
+    def show(self):
+        self.visible = True
+
+    def hide(self):
+        self.visible = False
+
+    def draw(self, surface):
+        if self.visible:
+            for pos in self.positions:
+                surface.blit(check_image, pos)
+
+    def check_click(self, mouse_pos):
+        if not self.visible:
+            return False
+        for pos in self.positions:
+            rel_x = mouse_pos[0] - pos[0]
+            rel_y = mouse_pos[1] - pos[1]
+            if 0 <= rel_x < check_width and 0 <= rel_y < check_height:
+                if check_mask.get_at((rel_x, rel_y)):
+                    self.hide()
+                    return True
+        return False
+
+check_popup = CheckPopup()
+check_popup_shown_for_group = None
+
+class Key:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.visible = True
+
+    def set_position(self, x, y):
+        self.x = x
+        self.y = y
+        self.visible = True
+
+    def update(self, current_time):
+        pass
+
+    def draw(self, surface):
+        if self.visible:
+            surface.blit(key_image, (self.x, self.y))
+
+    def check_click(self, mouse_pos):
+        if self.visible:
+            rel_x = mouse_pos[0] - self.x
+            rel_y = mouse_pos[1] - self.y
+            if 0 <= rel_x < key_width and 0 <= rel_y < key_height:
+                if key_mask.get_at((rel_x, rel_y)):
+                    self.visible = False
+                    check_popup.show()
+                    return True
+        return False
+
+class StudentGroup:
+    def __init__(self, spawn_time, group_type="normal", stop_position=322):
+        self.spawn_time = spawn_time
+        self.group_type = group_type
+        self.right_frames, self.left_frames = load_group_frames(group_sprites[group_type])
+
+        self.state = "waiting"
+        self.x = VIRTUAL_WIDTH
+        self.y = min(755, VIRTUAL_HEIGHT - group_frame_height)
+        self.frame = 0
+        self.last_update = pygame.time.get_ticks()
+        self.direction = "left"
+        self.speed = 10
+        self.stop_time = None
+        self.stop_position = stop_position
+        self.key = Key(self.x + 30, self.y - 50)
+
+    def update(self, current_time):
+        if self.state == "waiting" and current_time >= self.spawn_time:
+            self.state = "entering"
+        elif self.state == "entering":
+            self.x -= self.speed
+            if self.x <= self.stop_position:
+                self.x = self.stop_position
+                self.state = "stopped"
+                self.stop_time = current_time
+                self.key.set_position(self.x + 53.65, self.y - 50)
+        elif self.state == "stopped" and current_time - self.stop_time >= 20000:
+            self.state = "exiting"
+            self.direction = "right"
+        elif self.state == "exiting":
+            self.x += self.speed
+            if self.x >= VIRTUAL_WIDTH:
+                self.state = "done"
+
+        if self.state in ["entering", "exiting"]:
+            if current_time - self.last_update > group_animation_cooldown:
+                self.frame = (self.frame + 1) % group_animation_steps
+                self.last_update = current_time
+
+        self.key.update(current_time)
+
+    def draw(self, surface):
+        if self.state in ["entering", "stopped", "exiting"]:
+            frames = self.right_frames if self.direction == "right" else self.left_frames
+            surface.blit(frames[self.frame], (self.x, self.y))
+            if self.state == "stopped":
+                self.key.draw(surface)
+
+    def is_done(self):
+        return self.state == "done"
+
+clock = pygame.time.Clock()
+FPS = 60
+running = True
+
+groups = []
+first_group_time = pygame.time.get_ticks() + 4000
+next_group_time = first_group_time
+current_group = None
+group_types = list(group_sprites.keys())
+
+while running:
+    dt = clock.tick(FPS)
+    current_time = pygame.time.get_ticks()
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+            running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            # Scale mouse position to virtual resolution
+            mx, my = pygame.mouse.get_pos()
+            scale_x = VIRTUAL_WIDTH / screen_width
+            scale_y = VIRTUAL_HEIGHT / screen_height
+            mouse_x = int(mx * scale_x)
+            mouse_y = int(my * scale_y)
+
+            if not check_popup.check_click((mouse_x, mouse_y)):
+                clicked_key = False
+                for group in groups:
+                    if group.state == "stopped" and group.key.check_click((mouse_x, mouse_y)):
+                        check_popup_shown_for_group = group
+                        clicked_key = True
+                        break
+                if not clicked_key:
+                    if mouse_y > 760:
+                        mouse_y = 760
+                    char_facing_right = mouse_x > char_x
+                    dx, dy = mouse_x - char_x, mouse_y - char_y
+                    if abs(dx) > abs(dy):
+                        char_target_x = mouse_x
+                        char_target_y = char_y
+                    else:
+                        char_target_x = char_x
+                        char_target_y = mouse_y
+
+    char_moving = False
+    if char_x != char_target_x:
+        char_moving = True
+        char_x += char_speed if char_target_x > char_x else -char_speed
+        if abs(char_target_x - char_x) < char_speed:
+            char_x = char_target_x
+    elif char_y != char_target_y:
+        char_moving = True
+        char_y += char_speed if char_target_y > char_y else -char_speed
+        if abs(char_target_y - char_y) < char_speed:
+            char_y = char_target_y
+
+    char_x = max(0, min(char_x, VIRTUAL_WIDTH - char_frame_width * char_scale))
+    char_y = max(0, min(char_y, VIRTUAL_HEIGHT - char_frame_height * char_scale))
+
+    if char_moving and current_time - char_last_update > char_animation_cooldown:
+        char_frame = (char_frame + 1) % char_animation_steps
+        char_last_update = current_time
+    elif not char_moving:
+        char_frame = 0
+
+    for group in groups:
+        group.update(current_time)
+
+    if check_popup_shown_for_group and check_popup_shown_for_group.state == "exiting":
+        check_popup.hide()
+        check_popup_shown_for_group = None
+
+    groups = [g for g in groups if not g.is_done()]
+
+    if current_group is None or current_group.is_done():
+        if current_time >= next_group_time:
+            chosen_type = random.choice(group_types)
+            current_group = StudentGroup(current_time, group_type=chosen_type, stop_position=322)
+            groups.append(current_group)
+            next_group_time = current_time + 10000
+
+    # --- DRAW EVERYTHING ON VIRTUAL SURFACE ---
+    virtual_surface.blit(background_image, (0, 0))
+    virtual_surface.blit(overlay_image, overlay_position)
+    virtual_surface.blit(room_image, room_position)
+
+    sheet.update(current_time)
+    sheet.draw(virtual_surface)
+    virtual_surface.blit(bord_image, bord_position)
+
+    for group in groups:
+        group.draw(virtual_surface)
+
+    if char_facing_right:
+        virtual_surface.blit(char_right_frames[char_frame], (char_x, char_y))
+    else:
+        virtual_surface.blit(char_left_frames[char_frame], (char_x, char_y))
+
+    check_popup.draw(virtual_surface)
+
+    # --- SCALE VIRTUAL SURFACE TO SCREEN ---
+    scaled_surface = pygame.transform.smoothscale(virtual_surface, (screen_width, screen_height))
+    screen.blit(scaled_surface, (0, 0))
+    pygame.display.update()
+
+pygame.quit()
+sys.exit()
